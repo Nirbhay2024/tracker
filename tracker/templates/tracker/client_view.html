@@ -1,0 +1,91 @@
+{% extends 'tracker/base.html' %}
+
+{% block content %}
+<div class="text-center mb-5 mt-3">
+    <h1>{{ project.name }}</h1>
+    <p class="text-muted">Live Project Status</p>
+    
+    <div class="progress" style="height: 30px;">
+        <div class="progress-bar bg-success" role="progressbar" style="width: {{ progress }}%;">
+            {{ progress }}% Complete
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    {% for item in pole_list %}
+    <div class="col-md-6 col-lg-4 mb-4">
+        
+        <div class="card h-100 shadow-sm" style="cursor: pointer; transition: transform 0.2s;" 
+             data-bs-toggle="modal" data-bs-target="#modal-{{ item.pole_obj.id }}"
+             onmouseover="this.style.transform='scale(1.02)'" 
+             onmouseout="this.style.transform='scale(1)'">
+             
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">{{ item.pole_obj.identifier }}</h5>
+                {% if item.pole_obj.is_completed %}
+                    <span class="badge bg-success">Done</span>
+                {% else %}
+                    <span class="badge bg-warning text-dark">In Progress</span>
+                {% endif %}
+            </div>
+
+            <div class="card-body text-center">
+                {% if item.history %}
+                    <img src="{{ item.history.last.image.url }}" class="img-fluid rounded mb-2" style="height: 200px; object-fit: cover;">
+                    <p class="text-muted small mb-0">
+                        Current: <strong>{{ item.history.last.stage.name }}</strong>
+                        <br>
+                        (Click to see all {{ item.history.count }} photos)
+                    </p>
+                {% else %}
+                    <div class="p-4 bg-light rounded text-muted">
+                        No work started yet.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="modal fade" id="modal-{{ item.pole_obj.id }}" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">{{ item.pole_obj.identifier }} - Full History</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body bg-light">
+                        
+                        {% for evidence in item.history %}
+                        <div class="card mb-3 border-0 shadow-sm">
+                            <div class="card-body">
+                                <h5 class="card-title text-primary">{{ evidence.stage.name }}</h5>
+                                <h6 class="card-subtitle mb-3 text-muted">
+                                    {{ evidence.captured_at|date:"F j, Y, g:i a" }}
+                                </h6>
+                                
+                                <img src="{{ evidence.image.url }}" class="img-fluid rounded w-100">
+                                
+                                {% if evidence.gps_lat %}
+                                    <div class="mt-2">
+                                        <a href="https://maps.google.com/?q={{ evidence.gps_lat }},{{ evidence.gps_long }}" target="_blank" class="small text-decoration-none text-muted">
+                                            📍 GPS: {{ evidence.gps_lat }}, {{ evidence.gps_long }}
+                                        </a>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% empty %}
+                        <p class="text-center p-3">No photos uploaded yet.</p>
+                        {% endfor %}
+
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+    {% endfor %}
+</div>
+{% endblock %}

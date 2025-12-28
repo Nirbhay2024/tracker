@@ -1,0 +1,74 @@
+{% extends 'tracker/base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2>{{ project.name }}</h2>
+        <span class="badge bg-primary">Admin Inspection Mode</span>
+    </div>
+    <a href="/admin/" class="btn btn-outline-dark">Back to Admin Panel</a>
+</div>
+
+<div class="card mb-4 bg-light border-primary">
+    <div class="card-body">
+        <h5 class="text-primary">🔗 Client Magic Link</h5>
+        <p class="mb-1">Send this link to the client. They can view progress without a password.</p>
+        
+        <div class="input-group">
+            <input type="text" class="form-control" value="{{ request.scheme }}://{{ request.get_host }}{% url 'client_view' project.client_uuid %}" readonly id="clientLink">
+            <button class="btn btn-primary" onclick="copyLink()">Copy Link</button>
+            <a href="{% url 'client_view' project.client_uuid %}" target="_blank" class="btn btn-outline-secondary">Open</a>
+        </div>
+    </div>
+</div>
+
+{% for pole, photos in inspection_data.items %}
+<div class="card mb-4 shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">📍 {{ pole.identifier }}</h5>
+        {% if pole.is_completed %}
+            <span class="badge bg-success">Complete</span>
+        {% else %}
+            <span class="badge bg-secondary">In Progress</span>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        {% if photos %}
+            <div class="row">
+                {% for photo in photos %}
+                <div class="col-6 col-md-3 mb-3">
+                    <div class="border rounded p-2 text-center h-100 bg-light">
+                        <a href="{{ photo.image.url }}" target="_blank">
+                            <img src="{{ photo.image.url }}" class="img-fluid rounded mb-2" style="height: 150px; object-fit: cover;">
+                        </a>
+                        
+                        <div class="small fw-bold">{{ photo.stage.name }}</div>
+                        <div class="text-muted" style="font-size: 0.8rem;">
+                            {{ photo.captured_at|date:"M d, H:i" }}
+                        </div>
+
+                        {% if photo.gps_lat %}
+                            <a href="https://www.google.com/maps/search/?api=1&query={{ photo.gps_lat }},{{ photo.gps_long }}" target="_blank" class="btn btn-sm btn-info text-white mt-1 py-0" style="font-size: 0.7rem;">
+                                🌍 View Map
+                            </a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="text-muted fst-italic">No photos uploaded for this pole yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+
+<script>
+function copyLink() {
+    var copyText = document.getElementById("clientLink");
+    copyText.select();
+    navigator.clipboard.writeText(copyText.value);
+    alert("Link copied to clipboard!");
+}
+</script>
+{% endblock %}

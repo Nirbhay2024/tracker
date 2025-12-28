@@ -1,0 +1,80 @@
+{% extends 'tracker/base.html' %}
+{% load tracker_extras %}
+
+{% block content %}
+<div class="mb-4">
+    <a href="{% url 'project_detail' pole.project.id %}" class="btn btn-secondary btn-sm mb-2">&larr; Back to Poles</a>
+    <h2>{{ pole.identifier }}</h2>
+    <p class="text-muted">{{ pole.project.name }}</p>
+</div>
+
+<div class="list-group">
+    {% for stage in stages %}
+        <div class="list-group-item p-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="mb-0">{{ stage.name }}</h5>
+                
+                {% if stage.id in evidence_map %}
+                    <span class="badge bg-success">Completed</span>
+                {% else %}
+                    <span class="badge bg-secondary">Pending</span>
+                {% endif %}
+            </div>
+
+            {% if stage.id in evidence_map %}
+                {% with proof=evidence_map|get_item:stage.id %}
+                    <img src="{{ proof.image.url }}" class="img-fluid rounded mt-2" style="max-height: 200px;">
+                    <small class="text-muted d-block mt-1">Uploaded: {{ proof.captured_at|date:"M d, H:i" }}</small>
+                {% endwith %}
+
+            {% else %}
+                <button class="btn btn-primary w-100 mt-2" onclick="triggerUpload('{{ stage.id }}')">
+                    📸 Take Photo
+                </button>
+            {% endif %}
+        </div>
+    {% endfor %}
+</div>
+
+<form id="uploadForm" method="post" enctype="multipart/form-data" style="display:none;">
+    {% csrf_token %}
+    {{ form.gps_lat }}
+    {{ form.gps_long }}
+    <input type="hidden" name="stage_id" id="hiddenStageId">
+    <input type="file" name="image" id="cameraInput" capture="environment" accept="image/*">
+</form>
+
+<script>
+function triggerUpload(stageId) {
+    // 1. Save which stage we are clicking
+    document.getElementById('hiddenStageId').value = stageId;
+    
+    // 2. Click the hidden file input
+    document.getElementById('cameraInput').click();
+}
+
+// 3. When user selects a photo, get GPS then submit
+document.getElementById('cameraInput').addEventListener('change', function() {
+    if (this.files.length > 0) {
+        
+        // Try to get GPS
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(function(position) {
+                // Success: Save coords
+                document.getElementById('id_gps_lat').value = position.coords.latitude.toFixed(6);
+                document.getElementById('id_gps_long').value = position.coords.longitude.toFixed(6);
+                // Submit Form
+                document.getElementById('uploadForm').submit();
+            }, function(error) {
+                // Error/Deny: Submit anyway (without GPS)
+                alert("GPS permission denied. Uploading without location.");
+                document.getElementById('uploadForm').submit();
+            });
+        } else {
+            // Browser doesn't support GPS
+            document.getElementById('uploadForm').submit();
+        }
+    }
+});
+</script>
+{% endblock %}

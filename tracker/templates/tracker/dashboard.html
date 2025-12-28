@@ -1,0 +1,20 @@
+{% extends 'tracker/base.html' %}
+
+{% block content %}
+<h2 class="mb-4">My Projects</h2>
+
+{% if projects %}
+    {% for project in projects %}
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title">{{ project.name }}</h5>
+            <p class="card-text text-muted">{{ project.project_type.name }}</p>
+            <a href="{% url 'project_detail' project.id %}" class="btn btn-outline-primary w-100">View Project</a>
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="alert alert-info">You have no active projects assigned.</div>
+{% endif %}
+
+{% endblock %}
