@@ -39,6 +39,8 @@ ALLOWED_HOSTS = [
     '127.0.0.1'
 ]
 
+# Force update for Render allowed hosts
+
 CSRF_TRUSTED_ORIGINS = [
     'https://tracker-r7wq.onrender.com',  # <--- Note the HTTPS://
     'http://127.0.0.1:8000',
