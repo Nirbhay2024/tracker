@@ -18,6 +18,13 @@ class User(AbstractUser):
 # 2. TEMPLATES (The Workflow Definitions)
 class ProjectType(models.Model):
     name = models.CharField(max_length=100) # e.g. "Solar Lights"
+    
+    unit_name = models.CharField(
+        max_length=50, 
+        default="Pole", 
+        help_text="What are we installing? e.g. 'Pole', 'Gantry', 'Cabinet'"
+    )
+    
     description = models.TextField(blank=True)
 
     def __str__(self):
@@ -50,6 +57,13 @@ class Project(models.Model):
     # NEW FIELD
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='ACTIVE')
 
+    contractors = models.ManyToManyField(
+        User, 
+        limit_choices_to={'role': 'CONTRACTOR'}, 
+        related_name='assigned_projects',
+        blank=True
+    )
+
     def __str__(self):
         return self.name
 
@@ -69,6 +83,24 @@ class Pole(models.Model):
 
     def __str__(self):
         return f"{self.project.name} - {self.identifier}"
+    
+    @property
+    def progress_percent(self):
+        # 1. Get total stages required for this project type
+        total_stages = self.project.project_type.stages.count()
+        
+        # 2. Avoid division by zero if no stages exist
+        if total_stages == 0:
+            return 0
+            
+        # 3. Count how many unique stages have uploaded evidence
+        # We import Evidence here to avoid "Circular Import" errors
+        from .models import Evidence
+        completed_stages = Evidence.objects.filter(pole=self).values('stage').distinct().count()
+        
+        # 4. Calculate percentage
+        percent = (completed_stages / total_stages) * 100
+        return int(percent)
 
 # 4. EVIDENCE (Photos)
 class Evidence(models.Model):

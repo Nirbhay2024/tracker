@@ -15,4 +15,6 @@ urlpatterns = [
     path('view/<uuid:client_uuid>/', views.client_view, name='client_view'),
     path('make_admin/', views.create_admin_user, name='make_admin'),
     path('project/<int:project_id>/complete/', views.mark_project_completed, name='mark_project_completed'),
-]
+    path('evidence/<int:evidence_id>/delete/', views.delete_evidence, name='delete_evidence'),
+    path('project/<int:project_id>/add_item/', views.create_project_item, name='create_project_item'),
+    ]

@@ -3,9 +3,21 @@
 
 {% block content %}
 
+
+
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2>{{ project.name }}</h2>
-    <a href="{% url 'dashboard' %}" class="btn btn-secondary btn-sm">Back</a>
+    
+    <div>
+        <form action="{% url 'create_project_item' project.id %}" method="post" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-primary shadow-sm">
+                <i class="bi bi-plus-lg"></i> + Add New {{ project.project_type.unit_name }}
+            </button>
+        </form>
+
+        <a href="{% url 'dashboard' %}" class="btn btn-secondary ms-2">Back</a>
+    </div>
 </div>
 
 <div class="list-group">

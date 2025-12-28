@@ -4,6 +4,8 @@ from .models import Project
 from django.contrib.auth import get_user_model  # <--- ADD THIS
 from django.http import HttpResponse
 from django.views.decorators.cache import never_cache
+from .utils import watermark_image, get_gps_from_image
+from django.contrib import messages  # <--- ADD THIS LINE
 
 @login_required
 def contractor_dashboard(request):
@@ -43,15 +45,19 @@ from .models import Project, Pole, StageDefinition, Evidence # <-- Update import
 @never_cache
 @login_required
 def dashboard(request):
-    # Only admins see the "Create" buttons and hidden features
     is_admin = request.user.is_superuser or request.user.is_staff
 
-    # Get ALL projects
-    all_projects = Project.objects.all().order_by('-created_at')
+    # 1. LOGIC FOR SHOWING PROJECTS
+    if is_admin:
+        # Admin sees ALL projects
+        projects_query = Project.objects.all().order_by('-created_at')
+    else:
+        # Contractors see ONLY assigned projects
+        projects_query = Project.objects.filter(contractors=request.user).order_by('-created_at')
     
-    # Filter them in Python or DB
-    active_projects = all_projects.filter(status='ACTIVE')
-    completed_projects = all_projects.filter(status='COMPLETED')
+    # 2. Filter Active vs Completed based on the user's allowed list
+    active_projects = projects_query.filter(status='ACTIVE')
+    completed_projects = projects_query.filter(status='COMPLETED')
 
     return render(request, 'tracker/dashboard.html', {
         'active_projects': active_projects,
@@ -59,45 +65,116 @@ def dashboard(request):
         'is_admin': is_admin
     })
 
+# @never_cache
+# @login_required
+# def dashboard(request):
+#     # Only admins see the "Create" buttons and hidden features
+#     is_admin = request.user.is_superuser or request.user.is_staff
+
+#     # Get ALL projects
+#     all_projects = Project.objects.all().order_by('-created_at')
+    
+#     # Filter them in Python or DB
+#     active_projects = all_projects.filter(status='ACTIVE')
+#     completed_projects = all_projects.filter(status='COMPLETED')
+
+#     return render(request, 'tracker/dashboard.html', {
+#         'active_projects': active_projects,
+#         'completed_projects': completed_projects,
+#         'is_admin': is_admin
+#     })
+
+
+
+from .utils import watermark_image  # <--- Make sure to import this at the top!
+
+from .utils import watermark_image
 
 def pole_detail(request, pole_id):
     pole = get_object_or_404(Pole, id=pole_id)
-    stages = pole.project.project_type.stages.all()
+    stages = pole.project.project_type.stages.all().order_by('order')
     existing_evidence = Evidence.objects.filter(pole=pole)
     evidence_map = {e.stage.id: e for e in existing_evidence}
 
     if request.method == 'POST':
+        # 1. Capture Data
+        stage_id = request.POST.get('stage_id')
+        lat = request.POST.get('gps_lat')
+        lon = request.POST.get('gps_long')
+        raw_file = request.FILES.get('image')
+
+        # 2. "REPLACE" LOGIC
+        if stage_id:
+            stage_obj = get_object_or_404(StageDefinition, id=stage_id)
+            Evidence.objects.filter(pole=pole, stage=stage_obj).delete()
+
         form = EvidenceForm(request.POST, request.FILES)
+
         if form.is_valid():
             try:
+                # 3. PREPARE INSTANCE
                 evidence = form.save(commit=False)
                 evidence.pole = pole
-                stage_id = request.POST.get('stage_id')
-                
                 if stage_id:
-                    evidence.stage = get_object_or_404(StageDefinition, id=stage_id)
-                    evidence.save()
-                    
-                    # --- DEBUGGING MATH START ---
-                    total_required = stages.count()
-                    stages_done = Evidence.objects.filter(pole=pole).values('stage').distinct().count()
-                    
-                    print(f"--------------------------------------------------")
-                    print(f"DEBUG: Pole needs {total_required} stages.")
-                    print(f"DEBUG: You have completed {stages_done} stages.")
-                    
-                    if stages_done >= total_required:
-                        print("DEBUG: MATH MATCHES! Marking as Complete.")
-                        pole.is_completed = True
-                        pole.save()
-                    else:
-                        print(f"DEBUG: STILL WAITING for {total_required - stages_done} more photos.")
-                    print(f"--------------------------------------------------")
-                    # --- DEBUGGING MATH END ---
+                    evidence.stage = stage_obj
 
-                    return redirect('pole_detail', pole_id=pole.id)
+                # 4. GPS FALLBACK (Check EXIF)
+                if (not lat or not lon) and raw_file:
+                    try:
+                        if hasattr(raw_file, 'seek'): raw_file.seek(0)
+                        exif_lat, exif_lon = get_gps_from_image(raw_file)
+                        if exif_lat and exif_lon:
+                            lat, lon = exif_lat, exif_lon
+                            evidence.gps_lat, evidence.gps_long = lat, lon
+                    except Exception:
+                        pass # Fail silently, we just want to save the photo
+
+                # 5. SAVE ORIGINAL
+                evidence.save() 
+
+                # 6. WATERMARK & UPDATE
+                if lat and lon and raw_file:
+                    try:
+                        if hasattr(raw_file, 'seek'): raw_file.seek(0)
+                        branded_photo = watermark_image(raw_file, lat, lon)
+                        branded_photo.name = raw_file.name 
+                        evidence.image = branded_photo 
+                        evidence.save()
+                    except Exception as e:
+                        print(f"Watermark Failed: {e}")
+
+                # ==================================================
+                # 7. NEW: AUTO-COMPLETE CHECK
+                # ==================================================
+                # Count how many stages are REQUIRED for this project type
+                required_count = StageDefinition.objects.filter(
+                    project_type=pole.project.project_type, 
+                    is_required=True
+                ).count()
+                
+                # Count how many required stages HAVE EVIDENCE for this pole
+                uploaded_count = Evidence.objects.filter(
+                    pole=pole, 
+                    stage__is_required=True
+                ).values('stage').distinct().count()
+
+                # If we have all the required photos, mark as complete!
+                if uploaded_count >= required_count:
+                    pole.is_completed = True
+                else:
+                    pole.is_completed = False # Still in progress
+                
+                pole.save()
+                # ==================================================
+
+                messages.success(request, "Upload successful!")
+                return redirect('pole_detail', pole_id=pole.id)
             except Exception as e:
-                print(f"Error: {e}")
+                print(f"Save Error: {e}")
+                messages.error(request, f"Error saving photo: {e}")
+        else:
+            messages.error(request, "Upload failed. Check terminal.")
+
     else:
         form = EvidenceForm()
 
@@ -107,6 +184,54 @@ def pole_detail(request, pole_id):
         'evidence_map': evidence_map,
         'form': form
     })
+
+
+# --- ADD THIS NEW FUNCTION FOR DELETING ---
+
+# @login_required
+# def delete_evidence(request, evidence_id):
+#     evidence = get_object_or_404(Evidence, id=evidence_id)
+#     pole_id = evidence.pole.id
+    
+#     # FIX: Removed the check for 'evidence.uploaded_by' because that field 
+#     # does not exist in your database model. 
+#     # We now allow any logged-in user (Admin or Contractor) to delete/replace.
+#     if request.user.is_authenticated:
+#         evidence.delete()
+        
+#         # Re-check completion status
+#         pole = Pole.objects.get(id=pole_id)
+#         # If we delete evidence, the pole might not be complete anymore
+#         # (You can add more complex logic here if needed)
+#         pole.is_completed = False 
+#         pole.save()
+        
+#     return redirect('pole_detail', pole_id=pole_id)
+
+@login_required
+def delete_evidence(request, evidence_id):
+    evidence = get_object_or_404(Evidence, id=evidence_id)
+    pole = evidence.pole # Get the pole before deleting
+    
+    if request.user.is_authenticated:
+        evidence.delete()
+        
+        # RE-CALCULATE COMPLETION
+        required_count = StageDefinition.objects.filter(
+            project_type=pole.project.project_type, 
+            is_required=True
+        ).count()
+        
+        uploaded_count = Evidence.objects.filter(
+            pole=pole, 
+            stage__is_required=True
+        ).values('stage').distinct().count()
+
+        # Update status
+        pole.is_completed = (uploaded_count >= required_count)
+        pole.save()
+        
+    return redirect('pole_detail', pole_id=pole.id)
 
 from django.contrib.admin.views.decorators import staff_member_required
 
@@ -176,3 +301,37 @@ def mark_project_completed(request, project_id):
     project.status = 'COMPLETED'
     project.save()
     return redirect('dashboard')
+
+
+@login_required
+def create_project_item(request, project_id):
+    if request.method == 'POST':
+        project = get_object_or_404(Project, id=project_id)
+        
+        # 1. Get the dynamic name (e.g., "Gantry" or "Pole")
+        unit_name = project.project_type.unit_name
+        
+        # 2. Calculate the next number safely
+        # Start with (Total + 1)
+        next_number = project.poles.count() + 1
+        new_identifier = f"{unit_name} #{next_number}"
+        
+        # Safety Loop: If "Pole #5" exists (maybe #6 was deleted?), keep adding 1 until we find a free name
+        while project.poles.filter(identifier=new_identifier).exists():
+            next_number += 1
+            new_identifier = f"{unit_name} #{next_number}"
+            
+        # 3. Create the new item
+        # Note: We still use the 'Pole' model, but the identifier makes it look like a Gantry/etc.
+        Pole.objects.create(
+            project=project,
+            identifier=new_identifier,
+            is_completed=False
+        )
+        
+        messages.success(request, f"New {unit_name} added: {new_identifier}")
+        return redirect('project_detail', project_id=project.id)
+    
+    return redirect('dashboard')
+
+
