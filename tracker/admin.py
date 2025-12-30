@@ -1,24 +1,21 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User, ProjectType, StageDefinition, Project, Pole, Evidence
+from .models import User, ProjectType, StageDefinition, Project, Pole, Evidence, ItemFieldDefinition, ItemFieldValue, Client
+from .forms import ItemFieldDefinitionForm 
 
-# 1. CUSTOM USER ADMIN
-# This ensures you can see and edit the 'Role' field in the Admin Panel
 class CustomUserAdmin(UserAdmin):
     model = User
-    # Add 'role' to the editable fields in the admin
-    fieldsets = UserAdmin.fieldsets + (
-        ('Role Configuration', {'fields': ('role',)}),
-    )
-    add_fieldsets = UserAdmin.add_fieldsets + (
-        ('Role Configuration', {'fields': ('role',)}),
-    )
-
+    fieldsets = UserAdmin.fieldsets + (('Role Configuration', {'fields': ('role',)}),)
+    add_fieldsets = UserAdmin.add_fieldsets + (('Role Configuration', {'fields': ('role',)}),)
 admin.site.register(User, CustomUserAdmin)
 
+# NEW: Client Admin
+@admin.register(Client)
+class ClientAdmin(admin.ModelAdmin):
+    list_display = ('name', 'created_at', 'get_link')
+    def get_link(self, obj): return f"/client/{obj.uuid}/"
+    get_link.short_description = "Client Dashboard Link"
 
-# 2. PROJECT TYPE & STAGES ADMIN
-# This allows you to add Stages (e.g., Excavation, Installation) directly inside the Project Type screen
 class StageDefinitionInline(admin.TabularInline):
     model = StageDefinition
     extra = 1
@@ -28,32 +25,29 @@ class ProjectTypeAdmin(admin.ModelAdmin):
     list_display = ('name', 'unit_name', 'description')
     inlines = [StageDefinitionInline]
 
+class ItemFieldDefinitionInline(admin.TabularInline):
+    model = ItemFieldDefinition
+    form = ItemFieldDefinitionForm 
+    extra = 1
+    fields = ('label', 'field_type', 'excel_column', 'is_grouping_key') 
+    def get_formset(self, request, obj=None, **kwargs):
+        formset = super().get_formset(request, obj, **kwargs)
+        formset.form.parent_project = obj 
+        return formset
 
-# 3. PROJECT ADMIN
-# This is where we added the Contractor Selection Box
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
-    list_display = ('name', 'project_type', 'status', 'created_at')
-    list_filter = ('status', 'project_type')
-    
-    # This creates the nice select box for multiple contractors
+    list_display = ('name', 'client', 'project_type', 'status')
+    list_filter = ('client', 'status', 'project_type')
     filter_horizontal = ('contractors',) 
+    inlines = [ItemFieldDefinitionInline]
     
     fieldsets = (
-        (None, {
-            'fields': ('name', 'project_type', 'status')
-        }),
-        ('Assignments', {
-            'fields': ('contractors',)
-        }),
+        (None, {'fields': ('name', 'client', 'project_type', 'status')}),
+        ('Assignments', {'fields': ('contractors',)}),
+        ('Data Source', {'fields': ('data_file',)}),
     )
 
-
-# 4. OTHER MODELS
-# Simple registration for the remaining models
 admin.site.register(Pole)
 admin.site.register(Evidence)
-
-# NOTE: StageDefinition is already managed inside ProjectType, 
-# but we can register it separately too if you want to see the full list.
-admin.site.register(StageDefinition)
+admin.site.register(ItemFieldValue)

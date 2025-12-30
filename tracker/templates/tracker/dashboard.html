@@ -75,9 +75,12 @@
                             </a>
                             
                             {% if is_admin %}
-                            <div class="input-group input-group-sm">
-                                <button class="btn btn-outline-secondary w-100" onclick="copyLink('{{ project.client_uuid }}')">
-                                    🔗 Copy Client Link
+                            <div class="btn-group" role="group">
+                                <a href="{% url 'client_view' project.client_uuid %}" target="_blank" class="btn btn-outline-secondary">
+                                    <i class="bi bi-eye"></i> View as Client
+                                </a>
+                                <button type="button" class="btn btn-outline-secondary" onclick="copyLink('{{ project.client_uuid }}')">
+                                    <i class="bi bi-link-45deg"></i> Copy
                                 </button>
                             </div>
                             {% endif %}
@@ -121,6 +124,7 @@
 </div>
 
 <script>
+// FIXED: Constructs the correct Magic Link using /view/ and the UUID
 function copyLink(uuid) {
     const link = `${window.location.origin}/view/${uuid}/`;
     navigator.clipboard.writeText(link);

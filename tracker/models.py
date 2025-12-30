@@ -1,108 +1,89 @@
-from django.db import models
-
-# Create your models here.
 import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from cloudinary.models import CloudinaryField
+from cloudinary_storage.storage import RawMediaCloudinaryStorage 
 
-# 1. CUSTOM USER (Admins, Contractors, Clients)
 class User(AbstractUser):
-    ROLE_CHOICES = (
-        ('ADMIN', 'Admin'),
-        ('CONTRACTOR', 'Contractor'),
-        ('CLIENT', 'Client'),
-    )
+    ROLE_CHOICES = (('ADMIN', 'Admin'), ('CONTRACTOR', 'Contractor'))
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='CONTRACTOR')
 
-# 2. TEMPLATES (The Workflow Definitions)
-class ProjectType(models.Model):
-    name = models.CharField(max_length=100) # e.g. "Solar Lights"
-    
-    unit_name = models.CharField(
-        max_length=50, 
-        default="Pole", 
-        help_text="What are we installing? e.g. 'Pole', 'Gantry', 'Cabinet'"
-    )
-    
-    description = models.TextField(blank=True)
+# 1. NEW MODEL: CLIENT (The Organization/State)
+class Client(models.Model):
+    name = models.CharField(max_length=200, help_text="e.g. 'UP Government' or 'Adani Power'")
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return self.name
+
+class ProjectType(models.Model):
+    name = models.CharField(max_length=100)
+    unit_name = models.CharField(max_length=50, default="Pole")
+    description = models.TextField(blank=True)
+    def __str__(self): return self.name
 
 class StageDefinition(models.Model):
     project_type = models.ForeignKey(ProjectType, on_delete=models.CASCADE, related_name='stages')
-    name = models.CharField(max_length=100) # e.g. "Pit Excavation"
+    name = models.CharField(max_length=100)
     order = models.PositiveIntegerField(default=0)
     is_required = models.BooleanField(default=True)
+    class Meta: ordering = ['order']
+    def __str__(self): return f"{self.project_type.name} - {self.name}"
 
-    class Meta:
-        ordering = ['order']
-
-    def __str__(self):
-        return f"{self.project_type.name} - {self.name}"
-
-# 3. PROJECTS & POLES
 class Project(models.Model):
-    STATUS_CHOICES = [
-        ('ACTIVE', 'Active'),
-        ('COMPLETED', 'Completed'),
-    ]
-    
-    name = models.CharField(max_length=200)
+    STATUS_CHOICES = [('ACTIVE', 'Active'), ('COMPLETED', 'Completed')]
+    name = models.CharField(max_length=200, help_text="This is the 'City' name")
     project_type = models.ForeignKey(ProjectType, on_delete=models.PROTECT)
-    client_uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
-    created_at = models.DateTimeField(auto_now_add=True)
     
-    # NEW FIELD
+    # LINK TO CLIENT
+    client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True, related_name='projects')
+    
+    # (Optional) Keep this for backward compatibility if needed, but we rely on Client model now
+    client_uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='ACTIVE')
-
-    contractors = models.ManyToManyField(
-        User, 
-        limit_choices_to={'role': 'CONTRACTOR'}, 
-        related_name='assigned_projects',
-        blank=True
+    contractors = models.ManyToManyField(User, limit_choices_to={'role': 'CONTRACTOR'}, related_name='assigned_projects', blank=True)
+    
+    data_file = models.FileField(
+        upload_to='project_data/', 
+        blank=True, null=True, 
+        help_text="Upload CSV/Excel for dropdowns.",
+        storage=RawMediaCloudinaryStorage() 
     )
 
-    def __str__(self):
-        return self.name
+    def __str__(self): return self.name
 
-    # Helper to calculate progress percentage
-    def progress(self):
-        total_poles = self.poles.count()
-        if total_poles == 0: return 0
-        # Count poles where all stages are done (simplest way)
-        # Or you can get more complex later. For now, let's just return a placeholder or 
-        # calculate based on "Is the last stage done?"
-        return 0 # We will improve this logic in the template for now
-    
+class ItemFieldDefinition(models.Model):
+    FIELD_TYPES = (('TEXT', 'Free Text Question'), ('DROPDOWN', 'Dropdown (from File)'))
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='field_definitions')
+    label = models.CharField(max_length=200, help_text="e.g. 'Scheme Name'")
+    field_type = models.CharField(max_length=20, choices=FIELD_TYPES, default='TEXT')
+    excel_column = models.CharField(max_length=100, blank=True)
+    is_grouping_key = models.BooleanField(default=False, help_text="Check this to use as the 'Village' grouping.")
+    def __str__(self): return f"{self.project.name} - {self.label}"
+
 class Pole(models.Model):
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='poles')
-    identifier = models.CharField(max_length=50) # e.g. "Pole #1"
+    identifier = models.CharField(max_length=100) # Increased length for "City_Village #1"
     is_completed = models.BooleanField(default=False)
-
-    def __str__(self):
-        return f"{self.project.name} - {self.identifier}"
+    def __str__(self): return f"{self.project.name} - {self.identifier}"
     
     @property
     def progress_percent(self):
-        # 1. Get total stages required for this project type
-        total_stages = self.project.project_type.stages.count()
-        
-        # 2. Avoid division by zero if no stages exist
-        if total_stages == 0:
-            return 0
-            
-        # 3. Count how many unique stages have uploaded evidence
-        # We import Evidence here to avoid "Circular Import" errors
+        total = self.project.project_type.stages.count()
+        if total == 0: return 0
         from .models import Evidence
-        completed_stages = Evidence.objects.filter(pole=self).values('stage').distinct().count()
-        
-        # 4. Calculate percentage
-        percent = (completed_stages / total_stages) * 100
-        return int(percent)
+        done = Evidence.objects.filter(pole=self).values('stage').distinct().count()
+        return int((done / total) * 100)
 
-# 4. EVIDENCE (Photos)
+class ItemFieldValue(models.Model):
+    pole = models.ForeignKey(Pole, on_delete=models.CASCADE, related_name='custom_values')
+    field_def = models.ForeignKey(ItemFieldDefinition, on_delete=models.CASCADE)
+    value = models.CharField(max_length=500)
+    def __str__(self): return f"{self.pole.identifier} - {self.value}"
+
 class Evidence(models.Model):
     pole = models.ForeignKey(Pole, on_delete=models.CASCADE, related_name='evidence')
     stage = models.ForeignKey(StageDefinition, on_delete=models.PROTECT)
@@ -110,6 +91,4 @@ class Evidence(models.Model):
     captured_at = models.DateTimeField(auto_now_add=True)
     gps_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     gps_long = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-
-    def __str__(self):
-        return f"{self.pole.identifier} - {self.stage.name}"
+    def __str__(self): return f"{self.pole.identifier} - {self.stage.name}"

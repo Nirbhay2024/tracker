@@ -1,0 +1,49 @@
+{% extends 'tracker/base.html' %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="text-center mb-5">
+        <h1 class="display-4 fw-bold text-dark">{{ client.name }}</h1>
+        <p class="lead text-muted">Project Overview Dashboard</p>
+    </div>
+
+    <div class="row justify-content-center mb-5">
+        <div class="col-md-8">
+            <div class="card border-0 shadow-sm bg-primary text-white">
+                <div class="card-body text-center p-4">
+                    <h3>Overall Progress</h3>
+                    <div class="progress mt-3" style="height: 30px;">
+                        <div class="progress-bar bg-warning text-dark fw-bold" style="width: {{ overall_progress }}%">
+                            {{ overall_progress }}%
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h3 class="mb-4 border-bottom pb-2">Cities (Projects)</h3>
+    <div class="row g-4">
+        {% for project in projects %}
+        <div class="col-md-6 col-lg-4">
+            <a href="{% url 'client_city_view' project.id %}" class="text-decoration-none">
+                <div class="card h-100 border-0 shadow hover-effect">
+                    <div class="card-body text-center p-5">
+                        <div class="display-1 mb-3">🏙️</div>
+                        <h2 class="card-title fw-bold text-dark">{{ project.name }}</h2>
+                        <p class="text-muted">{{ project.project_type.name }}</p>
+                        <span class="btn btn-outline-primary mt-3">View Villages &rarr;</span>
+                    </div>
+                </div>
+            </a>
+        </div>
+        {% empty %}
+        <div class="col-12 text-center text-muted">No cities assigned yet.</div>
+        {% endfor %}
+    </div>
+</div>
+
+<style>
+.hover-effect:hover { transform: translateY(-5px); transition: 0.3s; }
+</style>
+{% endblock %}

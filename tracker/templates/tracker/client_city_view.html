@@ -1,0 +1,73 @@
+{% extends 'tracker/base.html' %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 border-bottom pb-3">
+        <div>
+            <h1 class="fw-bold m-0">{{ project.name }}</h1>
+            <small class="text-muted">City Overview</small>
+        </div>
+        <div class="text-end">
+            <span class="display-6 fw-bold text-success">{{ progress }}%</span>
+            <span class="d-block small text-muted">Completed</span>
+        </div>
+    </div>
+
+    <div class="accordion" id="villageAccordion">
+        {% for village_name, data in grouped_data.items %}
+        <div class="accordion-item mb-3 shadow-sm border-0">
+            
+            <h2 class="accordion-header" id="head{{ forloop.counter }}">
+                <button class="accordion-button collapsed p-4" type="button" data-bs-toggle="collapse" data-bs-target="#collapse{{ forloop.counter }}">
+                    <div class="d-flex w-100 justify-content-between align-items-center pe-3">
+                        <div class="text-start">
+                            <h4 class="mb-0 fw-bold">{{ village_name }}</h4>
+                            <small class="text-muted">{{ data.total }} Items</small>
+                        </div>
+                        <div style="width: 150px;">
+                            <small class="text-muted d-block text-end mb-1">{{ data.percent }}% Done</small>
+                            <div class="progress" style="height: 8px;">
+                                <div class="progress-bar bg-success" style="width: {{ data.percent }}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </button>
+            </h2>
+
+            <div id="collapse{{ forloop.counter }}" class="accordion-collapse collapse" data-bs-parent="#villageAccordion">
+                <div class="accordion-body bg-light">
+                    <div class="row g-3">
+                        {% for item in data.poles %}
+                        <div class="col-md-6 col-xl-4">
+                            <div class="card h-100 border shadow-sm">
+                                <div class="card-header d-flex justify-content-between align-items-center bg-white">
+                                    <strong>{{ item.pole.identifier }}</strong>
+                                    {% if item.pole.is_completed %}
+                                    <span class="badge bg-success">Done</span>
+                                    {% else %}
+                                    <span class="badge bg-warning text-dark">In Progress</span>
+                                    {% endif %}
+                                </div>
+                                <div class="card-body">
+                                    <div class="d-flex gap-2 overflow-auto">
+                                        {% for photo in item.history %}
+                                        <a href="{{ photo.image.url }}" target="_blank">
+                                            <img src="{{ photo.image.url }}" class="rounded" style="height: 60px; width: 60px; object-fit: cover;">
+                                        </a>
+                                        {% empty %}
+                                        <span class="text-muted small">No photos.</span>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

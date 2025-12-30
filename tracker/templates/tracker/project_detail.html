@@ -9,12 +9,9 @@
     <h2>{{ project.name }}</h2>
     
     <div>
-        <form action="{% url 'create_project_item' project.id %}" method="post" class="d-inline">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-primary shadow-sm">
-                <i class="bi bi-plus-lg"></i> + Add New {{ project.project_type.unit_name }}
-            </button>
-        </form>
+        <a href="{% url 'create_project_item' project.id %}" class="btn btn-primary shadow-sm">
+            <i class="bi bi-plus-lg"></i> + Add New {{ project.project_type.unit_name }}
+        </a>
 
         <a href="{% url 'dashboard' %}" class="btn btn-secondary ms-2">Back</a>
     </div>
