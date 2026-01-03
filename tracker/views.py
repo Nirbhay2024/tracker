@@ -1,4 +1,5 @@
 import sys
+import csv
 from django.core.files.uploadedfile import InMemoryUploadedFile
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
@@ -6,28 +7,44 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.views.decorators.cache import never_cache
 from django.contrib import messages
 from django.http import HttpResponse
-from django.db.models import Q  # <--- Critical for Search functionality
-from .models import Project, Pole, StageDefinition, Evidence, ItemFieldValue, Client, ProjectIssue
+from django.db.models import Q
+from django.utils import timezone
+from .models import Project, Pole, StageDefinition, Evidence, ItemFieldValue, Client, ProjectIssue, ProjectLog
 from .forms import EvidenceForm, DynamicItemForm, IssueForm
 from .utils import watermark_image, get_gps_from_image
 
 # ==========================================
-# 1. MAIN DASHBOARD (With Search)
+# 0. LOGGING HELPER
 # ==========================================
+def log_action(project, user, action, target, details="", lat=None, lon=None):
+    """Helper to record an audit log entry."""
+    try:
+        ProjectLog.objects.create(
+            project=project,
+            user=user if user.is_authenticated else None,
+            action=action,
+            target=target,
+            details=details,
+            gps_lat=lat,
+            gps_long=lon
+        )
+    except Exception as e:
+        print(f"Logging Failed: {e}")
 
+# ==========================================
+# 1. MAIN DASHBOARD
+# ==========================================
 @never_cache
 @login_required
 def dashboard(request):
     is_admin = request.user.is_superuser or request.user.is_staff
     
-    # --- SELF-HEALING: Fix Missing IDs for Old Items ---
-    # This automatically generates IDs for old poles that have None
+    # Self-Healing: Fix Missing IDs
     poles_missing_ids = Pole.objects.filter(custom_id__isnull=True)
     if poles_missing_ids.exists():
         for p in poles_missing_ids:
-            p.save() # save() triggers the auto-ID generation logic we wrote in models.py
+            p.save()
     
-    # 1. Base Querysets
     if is_admin:
         projects_query = Project.objects.all().order_by('-created_at')
     else:
@@ -36,7 +53,6 @@ def dashboard(request):
     active_projects = projects_query.filter(status='ACTIVE')
     completed_projects = projects_query.filter(status='COMPLETED')
 
-    # 2. Search Logic
     search_query = request.GET.get('q')
     search_results = None
     
@@ -56,17 +72,50 @@ def dashboard(request):
         'search_results': search_results
     })
 
-
-
 # ==========================================
-# 2. PROJECT MANAGEMENT
+# 2. PROJECT MANAGEMENT & LOGS
 # ==========================================
 @login_required
 def project_detail(request, project_id):
     project = get_object_or_404(Project, id=project_id)
-    # Sort poles: Open Issues first, then by ID
     poles = sorted(project.poles.all(), key=lambda p: (not p.has_open_issue, p.id))
     return render(request, 'tracker/project_detail.html', {'project': project, 'poles': poles})
+
+@login_required
+def project_logs(request, project_id):
+    project = get_object_or_404(Project, id=project_id)
+    # Security: Only admins or assigned contractors can view logs
+    if not (request.user.is_superuser or request.user.is_staff or project.contractors.filter(id=request.user.id).exists()):
+        return HttpResponse("Unauthorized", status=401)
+        
+    logs = project.logs.all()
+    return render(request, 'tracker/project_logs.html', {'project': project, 'logs': logs})
+
+@login_required
+def export_project_logs(request, project_id):
+    project = get_object_or_404(Project, id=project_id)
+    if not (request.user.is_superuser or request.user.is_staff or project.contractors.filter(id=request.user.id).exists()):
+        return HttpResponse("Unauthorized", status=401)
+
+    response = HttpResponse(content_type='text/csv')
+    filename = f"Project_Logs_{project.name}_{timezone.now().strftime('%Y%m%d')}.csv"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+    writer = csv.writer(response)
+    writer.writerow(['Timestamp', 'User', 'Action', 'Target', 'Details', 'Latitude', 'Longitude'])
+
+    for log in project.logs.all():
+        writer.writerow([
+            log.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            log.user.username if log.user else "System/Client",
+            log.action,
+            log.target,
+            log.details,
+            log.gps_lat,
+            log.gps_long
+        ])
+
+    return response
 
 @login_required
 def mark_project_completed(request, project_id):
@@ -75,6 +124,9 @@ def mark_project_completed(request, project_id):
     project = get_object_or_404(Project, id=project_id)
     project.status = 'COMPLETED'
     project.save()
+    
+    log_action(project, request.user, "Project Completed", "Project Settings", "Marked status as COMPLETED")
+    
     return redirect('dashboard')
 
 @login_required
@@ -87,22 +139,23 @@ def create_project_item(request, project_id):
             temp_id = f"TEMP-{project.poles.count() + 1}"
             pole = Pole.objects.create(project=project, identifier=temp_id)
             
+            # Collect custom data for the log
+            custom_data_log = []
+            
             for field_def in project.field_definitions.all():
                 field_name = f"custom_{field_def.id}"
                 answer = form.cleaned_data.get(field_name)
                 ItemFieldValue.objects.create(pole=pole, field_def=field_def, value=answer)
+                custom_data_log.append(f"{field_def.label}: {answer}")
             
+            # --- Identifier Logic ---
             new_identifier = ""
             group_def = project.field_definitions.filter(is_grouping_key=True).first()
-            
             if group_def:
                 val_obj = ItemFieldValue.objects.filter(pole=pole, field_def=group_def).first()
                 group_value = val_obj.value if val_obj else ""
-                
                 if group_value:
-                    count = ItemFieldValue.objects.filter(
-                        field_def=group_def, value=group_value, pole__project=project
-                    ).count()
+                    count = ItemFieldValue.objects.filter(field_def=group_def, value=group_value, pole__project=project).count()
                     new_identifier = f"{project.name}_{group_value} #{count}"
             
             if not new_identifier:
@@ -116,6 +169,10 @@ def create_project_item(request, project_id):
 
             pole.identifier = new_identifier
             pole.save()
+            
+            # --- LOGGING ---
+            log_details = " | ".join(custom_data_log)
+            log_action(project, request.user, "Created Item", pole.identifier, f"Custom Fields: {log_details}")
             
             messages.success(request, f"Created {new_identifier}!")
             return redirect('project_detail', project_id=project.id)
@@ -141,19 +198,20 @@ def pole_detail(request, pole_id):
 
         if stage_id:
             stage_obj = get_object_or_404(StageDefinition, id=stage_id)
-            Evidence.objects.filter(pole=pole, stage=stage_obj).delete()
+            # Log Deletion (Overwrite)
+            if Evidence.objects.filter(pole=pole, stage=stage_obj).exists():
+                Evidence.objects.filter(pole=pole, stage=stage_obj).delete()
+                log_action(pole.project, request.user, "Re-Uploaded Evidence", pole.identifier, f"Overwrote stage: {stage_obj.name}")
 
         form = EvidenceForm(request.POST, request.FILES)
 
         if form.is_valid():
             try:
-                # 1. Prepare object (do not save to DB yet)
                 evidence = form.save(commit=False)
                 evidence.pole = pole
                 if stage_id:
                     evidence.stage = stage_obj
 
-                # 2. Extract GPS from EXIF if needed
                 if (not lat or not lon) and raw_file:
                     try:
                         if hasattr(raw_file, 'seek'): raw_file.seek(0)
@@ -161,54 +219,41 @@ def pole_detail(request, pole_id):
                         if exif_lat and exif_lon:
                             lat, lon = exif_lat, exif_lon
                     except Exception as e:
-                        print(f"DEBUG: EXIF Extraction Failed: {e}")
+                        print(f"DEBUG: EXIF Error: {e}")
 
                 if lat and lon:
                     evidence.gps_lat = lat
                     evidence.gps_long = lon
 
-                # 3. Apply Watermark BEFORE Saving
                 if raw_file:
-                    print("DEBUG: Starting Watermark Process...")
                     try:
                         if hasattr(raw_file, 'seek'): raw_file.seek(0)
-                        
-                        # Get watermarked content (ContentFile)
                         branded_content = watermark_image(raw_file, lat, lon)
-                        
-                        # Convert to InMemoryUploadedFile to fix Cloudinary/DB error
                         branded_file = InMemoryUploadedFile(
-                            file=branded_content,
-                            field_name=None,
-                            name=raw_file.name,
-                            content_type='image/jpeg',
-                            size=branded_content.tell(),
-                            charset=None
+                            file=branded_content, field_name=None, name=raw_file.name,
+                            content_type='image/jpeg', size=branded_content.tell(), charset=None
                         )
-                        
-                        # Assign the processed file
                         evidence.image = branded_file
-                        print("DEBUG: Watermark applied to object.")
-                        
                     except Exception as e:
-                        print(f"DEBUG: Watermark FAILED: {e}")
-                        # Fallback: evidence.image is already raw_file
+                        print(f"Watermark Error: {e}")
 
-                # 4. Final Save
                 evidence.save() 
 
-                # Auto-Complete Logic
+                # --- LOGGING ---
+                log_action(
+                    pole.project, request.user, "Uploaded Evidence", pole.identifier, 
+                    f"Stage: {evidence.stage.name}", lat=lat, lon=lon
+                )
+
                 required_count = StageDefinition.objects.filter(project_type=pole.project.project_type, is_required=True).count()
                 uploaded_count = Evidence.objects.filter(pole=pole, stage__is_required=True).values('stage').distinct().count()
-
                 pole.is_completed = (uploaded_count >= required_count)
                 pole.save()
 
                 messages.success(request, "Upload successful!")
                 return redirect('pole_detail', pole_id=pole.id)
             except Exception as e:
-                print(f"DEBUG: Save Error: {e}")
-                messages.error(request, f"Error saving photo: {e}")
+                messages.error(request, f"Error: {e}")
         else:
             messages.error(request, "Upload failed.")
     else:
@@ -220,12 +265,19 @@ def pole_detail(request, pole_id):
 def delete_evidence(request, evidence_id):
     evidence = get_object_or_404(Evidence, id=evidence_id)
     pole = evidence.pole
+    stage_name = evidence.stage.name
+    
     if request.user.is_authenticated:
         evidence.delete()
+        
+        # --- LOGGING ---
+        log_action(pole.project, request.user, "Deleted Evidence", pole.identifier, f"Deleted photo for: {stage_name}")
+        
         required_count = StageDefinition.objects.filter(project_type=pole.project.project_type, is_required=True).count()
         uploaded_count = Evidence.objects.filter(pole=pole, stage__is_required=True).values('stage').distinct().count()
         pole.is_completed = (uploaded_count >= required_count)
         pole.save()
+        
     return redirect('pole_detail', pole_id=pole.id)
 
 @staff_member_required
@@ -239,9 +291,8 @@ def admin_project_inspection(request, project_id):
     return render(request, 'tracker/admin_inspection.html', {'project': project, 'inspection_data': inspection_data})
 
 # ==========================================
-# 4. CLIENT VIEWS (HIERARCHY & MAGIC LINKS)
+# 4. CLIENT / ISSUE VIEWS
 # ==========================================
-
 def client_dashboard(request, client_uuid):
     client_org = get_object_or_404(Client, uuid=client_uuid)
     projects = client_org.projects.all().order_by('-created_at')
@@ -251,9 +302,7 @@ def client_dashboard(request, client_uuid):
     for p in projects:
         total_poles += p.poles.count()
         completed_poles += p.poles.filter(is_completed=True).count()
-        
     overall_progress = int((completed_poles/total_poles)*100) if total_poles > 0 else 0
-
     return render(request, 'tracker/client_dashboard.html', {
         'client': client_org,
         'projects': projects,
@@ -263,52 +312,45 @@ def client_dashboard(request, client_uuid):
 def client_city_view(request, client_uuid):
     project = get_object_or_404(Project, client_uuid=client_uuid)
     poles = project.poles.all()
-    
     total = poles.count()
     done = poles.filter(is_completed=True).count()
     progress = int((done/total)*100) if total > 0 else 0
-
     group_def = project.field_definitions.filter(is_grouping_key=True).first()
     grouped_data = {}
-
+    
     if group_def:
         for pole in poles:
             val_obj = pole.custom_values.filter(field_def=group_def).first()
             village_name = val_obj.value if (val_obj and val_obj.value) else "General"
-            
             if village_name not in grouped_data:
                 grouped_data[village_name] = {'poles': [], 'done': 0, 'total': 0}
-            
             history = pole.evidence.all().order_by('stage__order')
-            
-            # Check for open issues
+            custom_data = pole.custom_values.select_related('field_def').all()
             has_issue = pole.issues.filter(status='OPEN').exists()
-
             grouped_data[village_name]['poles'].append({
                 'pole': pole,
                 'history': history,
-                'has_issue': has_issue
+                'has_issue': has_issue,
+                'custom_data': custom_data
             })
-            
             grouped_data[village_name]['total'] += 1
             if pole.is_completed:
                 grouped_data[village_name]['done'] += 1
-        
         for v_name, data in grouped_data.items():
             data['percent'] = int((data['done'] / data['total']) * 100) if data['total'] > 0 else 0
-            
         grouped_data = dict(sorted(grouped_data.items()))
     else:
         grouped_data['All Locations'] = {'poles': [], 'done': done, 'total': total, 'percent': progress}
         for pole in poles:
             history = pole.evidence.all().order_by('stage__order')
+            custom_data = pole.custom_values.select_related('field_def').all()
             has_issue = pole.issues.filter(status='OPEN').exists()
             grouped_data['All Locations']['poles'].append({
                 'pole': pole, 
                 'history': history,
-                'has_issue': has_issue
+                'has_issue': has_issue,
+                'custom_data': custom_data
             })
-
     return render(request, 'tracker/client_city_view.html', {
         'project': project,
         'grouped_data': grouped_data,
@@ -324,24 +366,27 @@ def report_issue(request, pole_id):
                 pole=pole,
                 message=form.cleaned_data['message']
             )
+            # --- LOGGING ---
+            # User is None because this comes from the Client (Magic Link)
+            log_action(pole.project, None, "Client Flagged Issue", pole.identifier, f"Issue: {form.cleaned_data['message']}")
+            
             messages.success(request, "Issue reported to the admin.")
-    
     return redirect('client_view', client_uuid=pole.project.client_uuid)
 
 @login_required
 def project_issues(request, project_id):
     project = get_object_or_404(Project, id=project_id)
     issues = ProjectIssue.objects.filter(pole__project=project, status='OPEN').order_by('-created_at')
-    
-    return render(request, 'tracker/project_issues.html', {
-        'project': project,
-        'issues': issues
-    })
+    return render(request, 'tracker/project_issues.html', {'project': project, 'issues': issues})
 
 @login_required
 def resolve_issue(request, issue_id):
     issue = get_object_or_404(ProjectIssue, id=issue_id)
     issue.status = 'RESOLVED'
     issue.save()
+    
+    # --- LOGGING ---
+    log_action(issue.pole.project, request.user, "Resolved Issue", issue.pole.identifier, f"Resolved report from {issue.reported_by}")
+    
     messages.success(request, "Issue marked as resolved.")
     return redirect('project_issues', project_id=issue.pole.project.id)

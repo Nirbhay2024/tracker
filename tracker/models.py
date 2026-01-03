@@ -3,7 +3,7 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from cloudinary.models import CloudinaryField
 from cloudinary_storage.storage import RawMediaCloudinaryStorage
-from django.utils.crypto import get_random_string  # <--- THIS WAS MISSING
+from django.utils.crypto import get_random_string  # <--- Essential for custom_id
 
 class User(AbstractUser):
     ROLE_CHOICES = (('ADMIN', 'Admin'), ('CONTRACTOR', 'Contractor'))
@@ -13,9 +13,7 @@ class Client(models.Model):
     name = models.CharField(max_length=200, help_text="e.g. 'UP Government' or 'Adani Power'")
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return self.name
+    def __str__(self): return self.name
 
 class ProjectType(models.Model):
     name = models.CharField(max_length=100)
@@ -109,6 +107,21 @@ class ProjectIssue(models.Model):
     message = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='OPEN')
     created_at = models.DateTimeField(auto_now_add=True)
+    def __str__(self): return f"Issue on {self.pole.identifier}: {self.status}"
+
+# === NEW: PROJECT ACTIVITY LOG ===
+class ProjectLog(models.Model):
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='logs')
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    action = models.CharField(max_length=50)  # e.g., "Created Item", "Uploaded Evidence"
+    target = models.CharField(max_length=200) # e.g., "Pole #A1", "Project Settings"
+    details = models.TextField(blank=True)    # Detailed info (Custom fields, changes)
+    gps_lat = models.CharField(max_length=50, blank=True, null=True)
+    gps_long = models.CharField(max_length=50, blank=True, null=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-timestamp']
 
     def __str__(self):
-        return f"Issue on {self.pole.identifier}: {self.status}"
+        return f"{self.project.name} - {self.action} - {self.timestamp}"

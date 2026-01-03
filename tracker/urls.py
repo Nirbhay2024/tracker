@@ -2,6 +2,7 @@ from django.urls import path
 from . import views
 from django.contrib.auth import views as auth_views
 
+
 urlpatterns = [
     # Auth
     path('login/', auth_views.LoginView.as_view(template_name='tracker/login.html'), name='login'),
@@ -28,4 +29,8 @@ urlpatterns = [
     # Issue handeling 
     path('project/<int:project_id>/issues/', views.project_issues, name='project_issues'),
     path('issue/resolve/<int:issue_id>/', views.resolve_issue, name='resolve_issue'),
+
+    # --- AUDIT LOGS ---
+    path('project/<int:project_id>/logs/', views.project_logs, name='project_logs'),
+    path('project/<int:project_id>/logs/export/', views.export_project_logs, name='export_project_logs'),
 ]
