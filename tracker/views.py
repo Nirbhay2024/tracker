@@ -1,23 +1,33 @@
 import sys
-from django.core.files.uploadedfile import InMemoryUploadedFile  # <--- THIS WAS MISSING
+from django.core.files.uploadedfile import InMemoryUploadedFile
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib.admin.views.decorators import staff_member_required
 from django.views.decorators.cache import never_cache
 from django.contrib import messages
 from django.http import HttpResponse
+from django.db.models import Q  # <--- Critical for Search functionality
 from .models import Project, Pole, StageDefinition, Evidence, ItemFieldValue, Client, ProjectIssue
 from .forms import EvidenceForm, DynamicItemForm, IssueForm
 from .utils import watermark_image, get_gps_from_image
 
 # ==========================================
-# 1. MAIN DASHBOARD
+# 1. MAIN DASHBOARD (With Search)
 # ==========================================
+
 @never_cache
 @login_required
 def dashboard(request):
     is_admin = request.user.is_superuser or request.user.is_staff
     
+    # --- SELF-HEALING: Fix Missing IDs for Old Items ---
+    # This automatically generates IDs for old poles that have None
+    poles_missing_ids = Pole.objects.filter(custom_id__isnull=True)
+    if poles_missing_ids.exists():
+        for p in poles_missing_ids:
+            p.save() # save() triggers the auto-ID generation logic we wrote in models.py
+    
+    # 1. Base Querysets
     if is_admin:
         projects_query = Project.objects.all().order_by('-created_at')
     else:
@@ -26,11 +36,27 @@ def dashboard(request):
     active_projects = projects_query.filter(status='ACTIVE')
     completed_projects = projects_query.filter(status='COMPLETED')
 
+    # 2. Search Logic
+    search_query = request.GET.get('q')
+    search_results = None
+    
+    if search_query:
+        search_results = Pole.objects.filter(
+            Q(identifier__icontains=search_query) | 
+            Q(custom_id__icontains=search_query) 
+        )
+        if not is_admin:
+            search_results = search_results.filter(project__contractors=request.user)
+
     return render(request, 'tracker/dashboard.html', {
         'active_projects': active_projects,
         'completed_projects': completed_projects,
-        'is_admin': is_admin
+        'is_admin': is_admin,
+        'search_query': search_query,
+        'search_results': search_results
     })
+
+
 
 # ==========================================
 # 2. PROJECT MANAGEMENT
@@ -38,7 +64,8 @@ def dashboard(request):
 @login_required
 def project_detail(request, project_id):
     project = get_object_or_404(Project, id=project_id)
-    poles = project.poles.all()
+    # Sort poles: Open Issues first, then by ID
+    poles = sorted(project.poles.all(), key=lambda p: (not p.has_open_issue, p.id))
     return render(request, 'tracker/project_detail.html', {'project': project, 'poles': poles})
 
 @login_required

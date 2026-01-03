@@ -3,8 +3,6 @@
 
 {% block content %}
 
-
-
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2>{{ project.name }}</h2>
     
@@ -12,30 +10,46 @@
         <a href="{% url 'create_project_item' project.id %}" class="btn btn-primary shadow-sm">
             <i class="bi bi-plus-lg"></i> + Add New {{ project.project_type.unit_name }}
         </a>
-
         <a href="{% url 'dashboard' %}" class="btn btn-secondary ms-2">Back</a>
     </div>
 </div>
 
 <div class="list-group">
     {% for pole in poles %}
-        <a href="{% url 'pole_detail' pole.id %}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
-            <div>
-                <strong>{{ pole.identifier }}</strong>
+        <a href="{% url 'pole_detail' pole.id %}" 
+           class="list-group-item list-group-item-action d-flex justify-content-between align-items-center {% if pole.has_open_issue %}border-danger bg-danger-subtle{% endif %}">
+            
+            
+
+           
+           
+           <div>
+                <strong>{{ pole.identifier }}</strong> 
+                <span class="badge bg-light text-dark border ms-1">{{ pole.custom_id }}</span>
                 <br>
-                <small class="text-muted">Status: {{ pole.get_status_display|default:"In Progress" }}</small>
+                <small class="text-muted">Status: 
+                    {% if pole.has_open_issue %}
+                        <span class="text-danger fw-bold">⚠ Flagged by Client</span>
+                    {% else %}
+                        {{ pole.is_completed|yesno:"Completed,In Progress" }}
+                    {% endif %}
+                </small>
             </div>
-            {% if pole.is_completed %}
-                <span class="badge bg-success rounded-pill">Done</span>
-            {% else %}
-                <span class="badge bg-warning text-dark rounded-pill">Active</span>
-            {% endif %}
+
+            <div class="d-flex align-items-center gap-2">
+                {% if pole.has_open_issue %}
+                    <span class="badge bg-danger">🚩 Issue</span>
+                {% elif pole.is_completed %}
+                    <span class="badge bg-success rounded-pill">Done</span>
+                {% else %}
+                    <span class="badge bg-warning text-dark rounded-pill">Active</span>
+                {% endif %}
+                <i class="bi bi-chevron-right text-muted"></i>
+            </div>
         </a>
     {% empty %}
         <div class="alert alert-warning">
-            No poles have been created for this project yet.
-            <br>
-            <small>Ask the Admin to add poles in the backend.</small>
+            No items created yet.
         </div>
     {% endfor %}
 </div>

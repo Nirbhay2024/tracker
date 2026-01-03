@@ -4,33 +4,68 @@
 {% block content %}
 <div class="container py-4">
     
-    <div class="card shadow-sm mb-4 border-0 rounded-4">
-        <div class="card-body p-4">
-            <div class="d-flex justify-content-between align-items-center">
-                <div>
-                    <h5 class="text-muted mb-1">{{ pole.project.name }}</h5>
-                    <h2 class="fw-bold text-dark mb-0">{{ pole.identifier }}</h2>
-                </div>
-                <a href="{% url 'project_detail' pole.project.id %}" class="btn btn-outline-secondary rounded-pill">
-                    &larr; Back
-                </a>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h5 class="text-muted mb-1">{{ pole.project.name }}</h5>
+            <div class="d-flex align-items-center gap-2">
+                <h2 class="fw-bold mb-0">{{ pole.identifier }}</h2>
+                <span class="badge bg-secondary fs-6">{{ pole.custom_id }}</span>
+            </div>
+        </div>
+        <a href="{% url 'project_detail' pole.project.id %}" class="btn btn-outline-secondary rounded-pill px-4">
+            &larr; Back
+        </a>
+    </div>
+
+    {% if pole.has_open_issue %}
+    <div class="alert alert-danger shadow-sm border-danger border-2 mb-4 rounded-3">
+        <div class="d-flex justify-content-between align-items-start">
+            <div>
+                <h4 class="alert-heading fw-bold">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i> Correction Required
+                </h4>
+                <p class="mb-2">The client has flagged an issue. Please fix and re-upload evidence.</p>
             </div>
             
-            <hr class="my-3 opacity-25">
+            {% if user.is_superuser or user.is_staff %}
+                {% for issue in pole.issues.all %}
+                    {% if issue.status == 'OPEN' %}
+                        <a href="{% url 'resolve_issue' issue.id %}" class="btn btn-light text-danger fw-bold shadow-sm">
+                            ✅ Mark Resolved
+                        </a>
+                    {% endif %}
+                {% endfor %}
+            {% endif %}
+        </div>
 
+        <hr>
+        
+        <div class="bg-white p-3 rounded text-danger border border-danger border-opacity-25">
+            <h6 class="fw-bold mb-2">Client Feedback:</h6>
+            {% for issue in pole.issues.all %}
+                {% if issue.status == 'OPEN' %}
+                    <p class="mb-0 fst-italic">"{{ issue.message }}"</p>
+                    <small class="text-muted d-block mt-1 text-end">- Reported by {{ issue.reported_by }} on {{ issue.created_at|date:"M d, Y" }}</small>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    
+
+    <div class="card shadow-sm mb-4 border-0 rounded-4">
+        <div class="card-body p-4">
             {% if pole.is_completed %}
-                <div class="alert alert-success fw-bold d-flex align-items-center rounded-3">
+                <div class="alert alert-success fw-bold d-flex align-items-center rounded-3 mb-0">
                     <i class="bi bi-check-circle-fill fs-4 me-2"></i> All Stages Completed!
                 </div>
             {% else %}
                 <div class="d-flex justify-content-between mb-1">
-                    <small class="fw-bold text-dark">Progress</small>
+                    <small class="fw-bold text-dark">Completion Progress</small>
                     <small class="text-muted">{{ pole.progress_percent }}%</small>
                 </div>
                 <div class="progress" style="height: 15px; border-radius: 10px;">
-                    <div class="progress-bar bg-primary" role="progressbar" 
-                         style="width: {{ pole.progress_percent }}%">
-                    </div>
+                    <div class="progress-bar bg-primary" role="progressbar" style="width: {{ pole.progress_percent }}%"></div>
                 </div>
             {% endif %}
         </div>
@@ -95,20 +130,18 @@
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 rounded-4">
             <div class="modal-header bg-primary text-white rounded-top-4">
-                <h5 class="modal-title">Upload for: <span id="modalStageName" class="fw-bold"></span></h5>
+                <h5 class="modal-title">Upload: <span id="modalStageName"></span></h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             
             <form method="post" enctype="multipart/form-data" id="uploadForm">
                 {% csrf_token %}
                 <div class="modal-body p-4">
-                    
                     <input type="hidden" name="stage_id" id="inputStageId">
                     <input type="hidden" name="gps_lat" id="lat">
                     <input type="hidden" name="gps_long" id="lon">
 
                     <div class="mb-4 text-center">
-                        <label class="form-label fw-bold mb-3">Take a Photo</label>
                         <input type="file" name="image" class="form-control form-control-lg" accept="image/*" capture="environment" required>
                     </div>
 
@@ -116,7 +149,6 @@
                         <div class="spinner-border spinner-border-sm" role="status"></div>
                         <span>Acquiring Location...</span>
                     </div>
-
                 </div>
                 <div class="modal-footer border-0 p-3">
                     <button type="submit" class="btn btn-success w-100 btn-lg rounded-pill" id="submitBtn">
@@ -143,65 +175,51 @@
 </div>
 
 <script>
-    // --- 1. IMAGE ENLARGE LOGIC ---
+    // IMAGE ZOOM
     function openImageModal(url, caption) {
         document.getElementById('enlargedImage').src = url;
         document.getElementById('imageCaption').innerText = caption;
         new bootstrap.Modal(document.getElementById('imageModal')).show();
     }
 
-    // --- 2. UPLOAD & GPS LOGIC ---
+    // CAMERA & GPS
     function openCamera(stageId, stageName) {
         document.getElementById('inputStageId').value = stageId;
         document.getElementById('modalStageName').innerText = stageName;
         
-        // Reset status
+        // Reset Logic
         document.getElementById("submitBtn").disabled = false; 
         var status = document.getElementById("locationStatus");
         status.className = "d-flex align-items-center justify-content-center gap-2 p-2 rounded bg-light text-muted small";
         status.innerHTML = '<div class="spinner-border spinner-border-sm"></div> <span>Acquiring Location...</span>';
 
-        var myModal = new bootstrap.Modal(document.getElementById('uploadModal'));
-        myModal.show();
+        new bootstrap.Modal(document.getElementById('uploadModal')).show();
 
-        // Start GPS fetch
-        getLocation();
-    }
-
-    function getLocation() {
+        // Get GPS
         if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(showPosition, showError, {timeout: 10000, enableHighAccuracy: true});
-        } else {
-            showError();
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    document.getElementById("lat").value = position.coords.latitude.toFixed(6);
+                    document.getElementById("lon").value = position.coords.longitude.toFixed(6);
+                    
+                    var status = document.getElementById("locationStatus");
+                    status.className = "alert alert-success py-2 small mb-0 text-center fw-bold w-100";
+                    status.innerHTML = '<i class="bi bi-geo-alt-fill"></i> Location Locked';
+                }, 
+                function(error) {
+                    console.log("GPS Error");
+                    var status = document.getElementById("locationStatus");
+                    status.className = "alert alert-warning py-2 small mb-0 text-center w-100";
+                    status.innerHTML = "⚠️ GPS Weak - Using Photo Metadata";
+                }, 
+                {timeout: 10000, enableHighAccuracy: true}
+            );
         }
-    }
-
-    function showPosition(position) {
-        document.getElementById("lat").value = position.coords.latitude.toFixed(6);
-        document.getElementById("lon").value = position.coords.longitude.toFixed(6);
-        
-        var status = document.getElementById("locationStatus");
-        status.className = "alert alert-success py-2 small mb-0 text-center fw-bold";
-        status.innerHTML = '<i class="bi bi-geo-alt-fill"></i> Location Locked';
-    }
-
-    function showError(error) {
-        console.log("GPS Timeout/Error");
-        var status = document.getElementById("locationStatus");
-        status.className = "alert alert-warning py-2 small mb-0 text-center";
-        status.innerHTML = "⚠️ GPS Weak - Using Photo Data";
     }
 </script>
 
 <style>
-    .hover-scale:hover {
-        transform: scale(1.02);
-        transition: transform 0.2s ease-in-out;
-        cursor: zoom-in;
-    }
-    .cursor-pointer {
-        cursor: pointer;
-    }
+    .hover-scale:hover { transform: scale(1.02); transition: transform 0.2s ease-in-out; cursor: zoom-in; }
 </style>
 
 {% endblock %}

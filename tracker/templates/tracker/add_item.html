@@ -1,33 +1,78 @@
 {% extends 'tracker/base.html' %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-6">
-        <div class="card shadow">
-            <div class="card-header bg-primary text-white">
-                <h4 class="mb-0">Add New {{ project.project_type.unit_name }}</h4>
+<div class="row justify-content-center align-items-center min-vh-75">
+    <div class="col-md-8 col-lg-6">
+        
+        <div class="card shadow-lg border-0 rounded-4">
+            <div class="card-header bg-primary text-white text-center py-4 rounded-top-4">
+                <h3 class="mb-0 fw-bold">New Installation</h3>
+                <p class="mb-0 opacity-75">{{ project.project_type.unit_name }} for {{ project.name }}</p>
             </div>
-            <div class="card-body">
+            
+            <div class="card-body p-5">
                 <form method="post">
                     {% csrf_token %}
                     
+                    {% if form.errors %}
+                        <div class="alert alert-danger">
+                            Please correct the errors below.
+                        </div>
+                    {% endif %}
+
                     {% for field in form %}
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">{{ field.label }}</label>
-                            {{ field }}
+                        <div class="mb-4">
+                            <label class="form-label fw-bold text-dark mb-1">
+                                {{ field.label }}
+                            </label>
+                            
+                            {% if field.field.widget.input_type == 'select' %}
+                                <div class="input-group">
+                                    <span class="input-group-text bg-white border-end-0 text-primary">
+                                        <i class="bi bi-geo-alt-fill"></i>
+                                    </span>
+                                    {{ field }}
+                                </div>
+                                <div class="form-text">Select the location/group for this item.</div>
+                            {% else %}
+                                {{ field }}
+                            {% endif %}
+                            
                             {% if field.errors %}
-                                <div class="text-danger small">{{ field.errors }}</div>
+                                <div class="text-danger small mt-1">{{ field.errors }}</div>
                             {% endif %}
                         </div>
                     {% endfor %}
 
-                    <div class="d-grid gap-2">
-                        <button type="submit" class="btn btn-success">Create Item</button>
-                        <a href="{% url 'project_detail' project.id %}" class="btn btn-secondary">Cancel</a>
+                    <div class="d-grid gap-3 mt-5">
+                        <button type="submit" class="btn btn-primary btn-lg fw-bold rounded-pill shadow-sm hover-scale">
+                            <i class="bi bi-plus-circle me-2"></i> Create & Continue
+                        </button>
+                        <a href="{% url 'project_detail' project.id %}" class="btn btn-link text-decoration-none text-muted">
+                            Cancel
+                        </a>
                     </div>
                 </form>
             </div>
         </div>
+
     </div>
 </div>
+
+<style>
+    /* Contractor UI Polish */
+    .form-control, .form-select {
+        border-radius: 10px;
+        padding: 12px;
+        border: 1px solid #dee2e6;
+    }
+    .form-control:focus, .form-select:focus {
+        border-color: #0d6efd;
+        box-shadow: 0 0 0 4px rgba(13, 110, 253, 0.1);
+    }
+    .hover-scale:hover {
+        transform: scale(1.02);
+        transition: transform 0.2s;
+    }
+</style>
 {% endblock %}

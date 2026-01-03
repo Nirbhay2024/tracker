@@ -1,43 +1,47 @@
 {% extends 'tracker/base.html' %}
+{% load static %}
 
 {% block content %}
 <div class="row justify-content-center mt-5">
-    <div class="col-md-5 col-lg-4">
+    <div class="col-md-4">
         
-        <div class="card border-0 shadow-lg">
-            <div class="card-body p-5 text-center">
-                
-                <h2 class="fw-bold text-dark mb-1">Nexsafe</h2>
-                <p class="text-muted mb-4">Secure Project Access</p>
+        <div class="text-center mb-4">
+            <img src="{% static 'tracker/logo.png' %}" alt="Nexsafe Logo" style="height: 80px; width: auto;" class="mb-3 rounded shadow-sm">
+            <h3 class="fw-bold text-dark">Nexsafe</h3>
+            <h3 class="fw-bold text-dark">Secure Project Access</h3>
+            <p class="text-muted">Please sign in to continue</p>
+        </div>
 
-                {% if form.errors %}
-                    <div class="alert alert-danger py-2 fs-6">
-                        Invalid username or password.
-                    </div>
-                {% endif %}
-
+        <div class="card shadow-lg border-0 rounded-4">
+            <div class="card-body p-4">
                 <form method="post">
                     {% csrf_token %}
                     
-                    <div class="form-floating mb-3">
-                        <input type="text" name="username" class="form-control" id="id_username" placeholder="Username" required>
-                        <label for="id_username">Username</label>
+                    {% if form.non_field_errors %}
+                        <div class="alert alert-danger">
+                            {{ form.non_field_errors }}
+                        </div>
+                    {% endif %}
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Username</label>
+                        <input type="text" name="username" class="form-control form-control-lg bg-light" required autofocus>
                     </div>
 
-                    <div class="form-floating mb-3">
-                        <input type="password" name="password" class="form-control" id="id_password" placeholder="Password" required>
-                        <label for="id_password">Password</label>
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Password</label>
+                        <input type="password" name="password" class="form-control form-control-lg bg-light" required>
                     </div>
 
-                    <button type="submit" class="btn btn-primary w-100 py-2 fw-bold">
-                        Log In
-                    </button>
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary btn-lg fw-bold rounded-pill">Sign In</button>
+                    </div>
                 </form>
-
             </div>
-            <div class="card-footer bg-light text-center py-3">
-                <small class="text-muted">© 2025 Nexsafe Systems</small>
-            </div>
+        </div>
+        
+        <div class="text-center mt-4 text-muted small">
+            &copy; {% now "Y" %} Nexsafe. Authorized personnel only.
         </div>
 
     </div>

@@ -2,13 +2,13 @@ import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from cloudinary.models import CloudinaryField
-from cloudinary_storage.storage import RawMediaCloudinaryStorage 
+from cloudinary_storage.storage import RawMediaCloudinaryStorage
+from django.utils.crypto import get_random_string  # <--- THIS WAS MISSING
 
 class User(AbstractUser):
     ROLE_CHOICES = (('ADMIN', 'Admin'), ('CONTRACTOR', 'Contractor'))
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='CONTRACTOR')
 
-# 1. NEW MODEL: CLIENT (The Organization/State)
 class Client(models.Model):
     name = models.CharField(max_length=200, help_text="e.g. 'UP Government' or 'Adani Power'")
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
@@ -35,23 +35,12 @@ class Project(models.Model):
     STATUS_CHOICES = [('ACTIVE', 'Active'), ('COMPLETED', 'Completed')]
     name = models.CharField(max_length=200, help_text="This is the 'City' name")
     project_type = models.ForeignKey(ProjectType, on_delete=models.PROTECT)
-    
-    # LINK TO CLIENT
     client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True, related_name='projects')
-    
-    # (Optional) Keep this for backward compatibility if needed, but we rely on Client model now
     client_uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
-    
     created_at = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='ACTIVE')
     contractors = models.ManyToManyField(User, limit_choices_to={'role': 'CONTRACTOR'}, related_name='assigned_projects', blank=True)
-    
-    data_file = models.FileField(
-        upload_to='project_data/', 
-        blank=True, null=True, 
-        help_text="Upload CSV/Excel for dropdowns.",
-        storage=RawMediaCloudinaryStorage() 
-    )
+    data_file = models.FileField(upload_to='project_data/', blank=True, null=True, help_text="Upload CSV/Excel for dropdowns.", storage=RawMediaCloudinaryStorage())
 
     @property
     def has_open_issues(self):
@@ -70,8 +59,20 @@ class ItemFieldDefinition(models.Model):
 
 class Pole(models.Model):
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='poles')
-    identifier = models.CharField(max_length=100) # Increased length for "City_Village #1"
+    identifier = models.CharField(max_length=100)
+    
+    # Unique Tracking ID (e.g. "#TRK-X92Z")
+    custom_id = models.CharField(max_length=20, unique=True, blank=True, null=True, editable=False)
+    
     is_completed = models.BooleanField(default=False)
+
+    def save(self, *args, **kwargs):
+        # Auto-generate ID if not set
+        if not self.custom_id:
+            unique_code = get_random_string(6).upper()
+            self.custom_id = f"#{unique_code}" 
+        super().save(*args, **kwargs)
+
     def __str__(self): return f"{self.project.name} - {self.identifier}"
     
     @property
@@ -81,6 +82,10 @@ class Pole(models.Model):
         from .models import Evidence
         done = Evidence.objects.filter(pole=self).values('stage').distinct().count()
         return int((done / total) * 100)
+
+    @property
+    def has_open_issue(self):
+        return self.issues.filter(status='OPEN').exists()
 
 class ItemFieldValue(models.Model):
     pole = models.ForeignKey(Pole, on_delete=models.CASCADE, related_name='custom_values')
@@ -96,7 +101,6 @@ class Evidence(models.Model):
     gps_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     gps_long = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     def __str__(self): return f"{self.pole.identifier} - {self.stage.name}"
-
 
 class ProjectIssue(models.Model):
     STATUS_CHOICES = [('OPEN', 'Open'), ('RESOLVED', 'Resolved')]
